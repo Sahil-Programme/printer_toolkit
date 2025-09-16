@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>POPS3 Toolkit</title>
+    <meta name="theme-color" content="#00ffff">
+    <style>
+        body {
+            font-family: Arial;
+            margin: 0;
+            padding: 0;
+        }
+        
+        html,
+        body {
+            height: 100%;
+        }
+        
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            padding: 10px 30px;
+            background-color: #000000;
+            border-bottom: 3px solid #ccc;
+        }
+        
+        header img {
+            height: 70px;
+        }
+        
+        main {
+            display: flex;
+            justify-content: space-between;
+            padding: 40px;
+            background-color: #f0f0f0;
+            flex-wrap: wrap;
+            min-height: calc(100vh - 120px);
+            margin-top: 90px;
+        }
+        
+        .column {
+            flex: 1 1 25%;
+            padding: 20px;
+            border-right: 1px solid #ccc;
+            box-sizing: border-box;
+            min-width: 250px;
+            background-color: #f0f0f0;
+        }
+        
+        .column:last-child {
+            border-right: none;
+        }
+        
+        label,
+        input {
+            margin: 6px 0;
+            display: block;
+        }
+        
+        input[type=number] {
+            width: 100px;
+        }
+        
+        p {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <img src="Xefco.svg" alt="Company Logo">
+        <h1 style="font-size: 30px; margin-left: 50px; color: #51C3DB;">POPS3 Toolkit</h1>
+    </header>
+
+    <main>
+        <!-- Dryer Tool -->
+        <div class="column">
+            <h2>Dryer Speed & Time</h2>
+            <label for="settingInput">Controller Setting (0–50):</label>
+            <input type="number" id="settingInput" step="0.01" min="0" max="50" value="1.36">
+            <label>Time in Dryer:</label>
+            <input type="number" id="timeMin" min="0" step="1" style="width: 60px; display: inline;"> min
+            <input type="number" id="timeSec" min="0" max="59" step="1" style="width: 60px; display: inline;"> sec
+            <p id="status"></p>
+        </div>
+
+        <!-- Fan Mode Tool -->
+        <div class="column">
+            <h2>Input Temperature (°C) vs Actual Temperature (°C)</h2>
+            <label><input type="checkbox" id="fanToggle" checked> Fan On</label>
+            <label for="inputValue">Input (0–20 °C):</label>
+            <input type="number" id="inputValue" step="any" min="0" max="200" value="120">
+            <label for="actualValue">Actual (°C):</label>
+            <input type="number" id="actualValue" step="any" min="0" max="250" readonly>
+            <p id="actualStatus"></p>
+        </div>
+
+        <!-- Area Calculator -->
+        <div class="column">
+            <h2>Area Calculator</h2>
+            <label for="widthInput">Width (mm):</label>
+            <input type="number" id="widthInput" step="0.01" min="0" value="170">
+            <label for="heightInput">Height (mm):</label>
+            <input type="number" id="heightInput" step="0.01" min="0" value="170">
+            <p>Area: <span id="areaMM2">0</span> mm²</p>
+            <p>Area: <span id="areaM2">0</span> m²</p>
+        </div>
+
+        <!-- Ink Usage Calculator -->
+        <div class="column">
+            <h2>Ink Usage Calculator</h2>
+            <label for="inkVolume">Ink Volume (mL):</label>
+            <input type="number" id="inkVolume" min="0" step="0.01">
+            <label for="pigmentPercentage">Pigment %:</label>
+            <input type="number" id="pigmentPercentage" min="0" max="100" step="0.1">
+            <label for="printArea">Printed Area (m²):</label>
+            <input type="number" id="printArea" readonly>
+            <p>Ink Consumption: <span id="mlPerM2">0</span> mL/m²</p>
+            <p>Pigment Load: <span id="gPerM2">0</span> g/m²</p>
+        </div>
+
+        <!-- Exposure Time Calculator -->
+        <div class="column">
+            <h2>Exposure Time Calculator</h2>
+            <label for="dryerLength">Dryer Length (m):</label>
+            <input type="number" id="dryerLength" step="0.01" min="0" value="1.8">
+            <label for="printWidth">Print Width (m):</label>
+            <input type="number" id="printWidth" step="0.01" min="0" value="1.36">
+            <label for="areaSpeed">Area Speed (m²/hr):</label>
+            <input type="number" id="areaSpeed" step="0.01" min="0" value="26.86">
+            <label for="targetTime">Target Time (min):</label>
+            <input type="number" id="targetTime" step="0.01" min="0" value="0">
+
+            <p>Exposure Time: <span id="exposureTime">0</span> min</p>
+            <p>Required Dryer Length: <span id="requiredLength">0</span> m</p>
+        </div>
+
+    </main>
+
+    <script>
+        const beltLength = 1.80; // meters
+        let isSyncingDryer = false;
+
+        function polynomialSpeed(x) {
+            return -0.0273 + 0.3772 * x - 0.0079 * Math.pow(x, 2) + 0.0005 * Math.pow(x, 3);
+        }
+
+        function calculateTimeFromSetting(setting) {
+            const speed = polynomialSpeed(setting);
+            return speed > 0 ? beltLength / speed : null;
+        }
+
+        function interpolateSettingFromTime(targetTimeMin) {
+            const timeFromSetting = s => {
+                const spd = polynomialSpeed(s);
+                return spd > 0 ? beltLength / spd : Infinity;
+            };
+            let low = 0,
+                high = 50;
+            for (let i = 0; i < 100; i++) {
+                const mid = (low + high) / 2;
+                const t = timeFromSetting(mid);
+                if (Math.abs(t - targetTimeMin) < 0.0005) return mid;
+                t > targetTimeMin ? low = mid : high = mid;
+            }
+            return (low + high) / 2;
+        }
+
+        const settingInput = document.getElementById("settingInput"),
+            timeMin = document.getElementById("timeMin"),
+            timeSec = document.getElementById("timeSec"),
+            status = document.getElementById("status");
+
+        function updateFromSetting() {
+            if (isSyncingDryer) return;
+            isSyncingDryer = true;
+            const setting = parseFloat(settingInput.value),
+                time = calculateTimeFromSetting(setting);
+            if (time !== null) {
+                timeMin.value = Math.floor(time);
+                timeSec.value = Math.round((time % 1) * 60);
+                status.innerText = "";
+            } else {
+                timeMin.value = timeSec.value = "";
+                status.innerText = "Invalid or out-of-range setting.";
+            }
+            isSyncingDryer = false;
+        }
+
+        function updateFromTime() {
+            if (isSyncingDryer) return;
+            isSyncingDryer = true;
+            const mins = parseInt(timeMin.value) || 0,
+                secs = parseInt(timeSec.value) || 0,
+                totalTime = mins + secs / 60;
+            if (totalTime > 0) {
+                settingInput.value = interpolateSettingFromTime(totalTime).toFixed(2);
+                status.innerText = "";
+            } else {
+                settingInput.value = "";
+                status.innerText = "Time must be greater than 0.";
+            }
+            isSyncingDryer = false;
+        }
+
+        settingInput.addEventListener("input", updateFromSetting);
+        timeMin.addEventListener("input", updateFromTime);
+        timeSec.addEventListener("input", updateFromTime);
+
+        // Fan temperature calculator
+        const inputValue = document.getElementById("inputValue"),
+            actualValue = document.getElementById("actualValue"),
+            fanToggle = document.getElementById("fanToggle"),
+            actualStatus = document.getElementById("actualStatus");
+
+        function updateActualTemp() {
+            const input = parseFloat(inputValue.value);
+            if (isNaN(input) || input < 0 || input > 200) {
+                actualValue.value = "";
+                actualStatus.textContent = "Input out of 0–200°C range.";
+                return;
+            }
+            const multiplier = fanToggle.checked ? 0.87 : 0.94;
+            const actual = multiplier * input;
+            actualValue.value = actual.toFixed(2);
+            actualStatus.textContent = "";
+        }
+
+        inputValue.addEventListener("input", updateActualTemp);
+        fanToggle.addEventListener("change", updateActualTemp);
+
+        // Area calculator logic
+        const widthInput = document.getElementById("widthInput"),
+            heightInput = document.getElementById("heightInput"),
+            areaMM2 = document.getElementById("areaMM2"),
+            areaM2 = document.getElementById("areaM2"),
+            printArea = document.getElementById("printArea");
+
+        function updateArea() {
+            const width = parseFloat(widthInput.value),
+                height = parseFloat(heightInput.value);
+            if (!isNaN(width) && !isNaN(height)) {
+                const area = width * height;
+                const areaInM2 = area / 1e6;
+                areaMM2.textContent = area.toFixed(2);
+                areaM2.textContent = areaInM2.toFixed(6);
+                printArea.value = areaInM2.toFixed(6);
+                updateInkUsage();
+            } else {
+                areaMM2.textContent = areaM2.textContent = "0";
+                printArea.value = "";
+                updateInkUsage();
+            }
+        }
+
+        widthInput.addEventListener("input", updateArea);
+        heightInput.addEventListener("input", updateArea);
+
+        // Ink usage calculator
+        const inkVolume = document.getElementById("inkVolume"),
+            pigmentPercentage = document.getElementById("pigmentPercentage"),
+            mlPerM2 = document.getElementById("mlPerM2"),
+            gPerM2 = document.getElementById("gPerM2");
+
+        function updateInkUsage() {
+            const volume = parseFloat(inkVolume.value),
+                percent = parseFloat(pigmentPercentage.value),
+                area = parseFloat(printArea.value);
+            if (!isNaN(volume) && !isNaN(area) && area > 0 && !isNaN(percent)) {
+                const mlPerSqm = volume / area;
+                const gramsPerSqm = mlPerSqm * (percent / 100);
+                mlPerM2.textContent = mlPerSqm.toFixed(2);
+                gPerM2.textContent = gramsPerSqm.toFixed(2);
+            } else {
+                mlPerM2.textContent = gPerM2.textContent = "0";
+            }
+        }
+
+        inkVolume.addEventListener("input", updateInkUsage);
+        pigmentPercentage.addEventListener("input", updateInkUsage);
+
+        // Exposure time calculator
+        const dryerLength = document.getElementById("dryerLength"),
+            printWidth = document.getElementById("printWidth"),
+            areaSpeed = document.getElementById("areaSpeed"),
+            targetTime = document.getElementById("targetTime"),
+            exposureTime = document.getElementById("exposureTime"),
+            requiredLength = document.getElementById("requiredLength");
+
+        function updateExposureCalc() {
+            const L = parseFloat(dryerLength.value),
+                W = parseFloat(printWidth.value),
+                A = parseFloat(areaSpeed.value),
+                T = parseFloat(targetTime.value);
+
+            if (!isNaN(L) && !isNaN(W) && !isNaN(A) && A > 0) {
+                const t = (L * W * 60) / A;
+                exposureTime.textContent = t.toFixed(2);
+            } else {
+                exposureTime.textContent = "0";
+            }
+
+            if (!isNaN(W) && !isNaN(A) && A > 0 && !isNaN(T) && T > 0) {
+                const Lreq = (T * A) / (W * 60);
+                requiredLength.textContent = Lreq.toFixed(2);
+            } else {
+                requiredLength.textContent = "0";
+            }
+        }
+
+        dryerLength.addEventListener("input", updateExposureCalc);
+        printWidth.addEventListener("input", updateExposureCalc);
+        areaSpeed.addEventListener("input", updateExposureCalc);
+        targetTime.addEventListener("input", updateExposureCalc);
+
+        // On load
+        window.addEventListener("load", () => {
+            updateFromSetting();
+            updateActualTemp();
+            updateArea();
+            updateInkUsage();
+            updateExposureCalc();
+        });
+    </script>
+
+</body>
+
+</html>
